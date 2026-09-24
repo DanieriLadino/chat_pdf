@@ -92,4 +92,3 @@ else:
     st.info("Por favor carga un archivo PDF para comenzar")
 
 
-CUAL ES EL APPI KEY

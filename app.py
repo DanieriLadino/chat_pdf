@@ -1,103 +1,95 @@
 import os
-import platform
-
 import streamlit as st
 from PIL import Image
-from pypdf import PdfReader
-from langchain_text_splitters import CharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_community.vectorstores import FAISS
+from PyPDF2 import PdfReader
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.llms import OpenAI
+from langchain.chains.question_answering import load_qa_chain
+import platform
 
-# Titulo y presentacion
-st.title("Generación Aumentada por Recuperación (RAG) 💬")
+# App title and presentation
+st.title('Generación Aumentada por Recuperación (RAG) 💬')
 st.write("Versión de Python:", platform.python_version())
 
-# Imagen (opcional)
+# Load and display image
 try:
-    image = Image.open("Chat_pdf.png")
+    image = Image.open('Chat_pdf.png')
     st.image(image, width=350)
 except Exception as e:
     st.warning(f"No se pudo cargar la imagen: {e}")
 
-# Barra lateral
+# Sidebar information
 with st.sidebar:
     st.subheader("Este Agente te ayudará a realizar análisis sobre el PDF cargado")
 
-# Clave de OpenAI (cada usuario pone la suya)
-ke = st.text_input("Ingresa tu Clave de OpenAI", type="password")
+# Get API key from user
+ke = st.text_input('Ingresa tu Clave de OpenAI', type="password")
 if ke:
-    os.environ["OPENAI_API_KEY"] = ke
+    os.environ['OPENAI_API_KEY'] = ke
+else:
+    st.warning("Por favor ingresa tu clave de API de OpenAI para continuar")
 
-# Carga del PDF
+# PDF uploader
 pdf = st.file_uploader("Carga el archivo PDF", type="pdf")
 
-
-@st.cache_resource(show_spinner="Procesando el documento...")
-def construir_base(pdf_bytes: bytes, api_key: str):
-    """Extrae el texto, lo divide en fragmentos y crea la base vectorial.
-    Se guarda en cache para no volver a generar embeddings en cada interaccion."""
-    import io
-
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    text = ""
-    for page in reader.pages:
-        text += (page.extract_text() or "") + "\n"
-
-    splitter = CharacterTextSplitter(
-        separator="\n",
-        chunk_size=500,
-        chunk_overlap=20,
-        length_function=len,
-    )
-    chunks = splitter.split_text(text)
-
-    embeddings = OpenAIEmbeddings(api_key=api_key)
-    base = FAISS.from_texts(chunks, embeddings)
-    return base, len(text), len(chunks)
-
-
+# Process the PDF if uploaded
 if pdf is not None and ke:
     try:
-        knowledge_base, n_chars, n_chunks = construir_base(pdf.getvalue(), ke)
-
-        if n_chars == 0:
-            st.error("No se pudo extraer texto del PDF. Puede ser un PDF escaneado (solo imágenes).")
-            st.stop()
-
-        st.info(f"Texto extraído: {n_chars} caracteres")
-        st.success(f"Documento dividido en {n_chunks} fragmentos")
-
+        # Extract text from PDF
+        pdf_reader = PdfReader(pdf)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+        
+        st.info(f"Texto extraído: {len(text)} caracteres")
+        
+        # Split text into chunks
+        text_splitter = CharacterTextSplitter(
+            separator="\n",
+            chunk_size=500,
+            chunk_overlap=20,
+            length_function=len
+        )
+        chunks = text_splitter.split_text(text)
+        st.success(f"Documento dividido en {len(chunks)} fragmentos")
+        
+        # Create embeddings and knowledge base
+        embeddings = OpenAIEmbeddings()
+        knowledge_base = FAISS.from_texts(chunks, embeddings)
+        
+        # User question interface
         st.subheader("Escribe qué quieres saber sobre el documento")
         user_question = st.text_area(" ", placeholder="Escribe tu pregunta aquí...")
-
+        
+        # Process question when submitted
         if user_question:
-            docs = knowledge_base.similarity_search(user_question, k=4)
-            contexto = "\n\n".join(d.page_content for d in docs)
-
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=ke)
-
-            prompt = (
-                "Responde la pregunta usando solo el contexto del documento. "
-                "Si la respuesta no está en el contexto, dilo claramente.\n\n"
-                f"Contexto:\n{contexto}\n\n"
-                f"Pregunta: {user_question}\n\n"
-                "Respuesta:"
-            )
-
-            with st.spinner("Pensando..."):
-                response = llm.invoke(prompt)
-
+            docs = knowledge_base.similarity_search(user_question)
+            
+            # Use a current model instead of deprecated text-davinci-003
+            # Options: "gpt-3.5-turbo-instruct" or "gpt-4o" depending on your API access
+            llm = OpenAI(temperature=0, model_name="gpt-4o-mini-2024-07-18")
+            
+            # Load QA chain
+            chain = load_qa_chain(llm, chain_type="stuff")
+            
+            # Run the chain
+            response = chain.run(input_documents=docs, question=user_question)
+            
+            # Display the response
             st.markdown("### Respuesta:")
-            st.markdown(response.content)
-
+            st.markdown(response)
+                
     except Exception as e:
+        st.error(f"Error al procesar el PDF: {str(e)}")
+        # Add detailed error for debugging
         import traceback
-        st.error(f"Error al procesar el PDF: {e}")
-        st.code(traceback.format_exc())
-
+        st.error(traceback.format_exc())
 elif pdf is not None and not ke:
-    st.warning("Por favor ingresa tu clave de API de OpenAI para continuar")
-elif not ke:
     st.warning("Por favor ingresa tu clave de API de OpenAI para continuar")
 else:
     st.info("Por favor carga un archivo PDF para comenzar")
+
+
+CUAL ES EL APPI KEY
